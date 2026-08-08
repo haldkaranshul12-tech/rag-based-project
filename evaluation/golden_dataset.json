@@ -1,0 +1,32 @@
+[
+  {
+    "id": "gd_001",
+    "question": "What is this document about?",
+    "expected_keywords": ["RAG", "chatbot", "PDF", "document"],
+    "notes": "Broad/summary-type question -- should use full-document context, not narrow retrieval."
+  },
+  {
+    "id": "gd_002",
+    "question": "Does this project currently support multiple PDFs at once?",
+    "expected_keywords": ["multi-document", "multi-PDF", "yes", "no"],
+    "notes": "Tests whether the model correctly distinguishes implemented vs planned/future features."
+  },
+  {
+    "id": "gd_003",
+    "question": "What embedding model is used?",
+    "expected_keywords": ["MiniLM", "sentence-transformers", "all-MiniLM-L6-v2"],
+    "notes": "Specific factual lookup -- tests keyword/BM25 side of hybrid retrieval."
+  },
+  {
+    "id": "gd_004",
+    "question": "What happens if the uploaded PDF is a scanned image with no text layer?",
+    "expected_keywords": ["OCR", "Tesseract", "scanned", "image"],
+    "notes": "Tests retrieval of a specific troubleshooting/edge-case passage."
+  },
+  {
+    "id": "gd_005",
+    "question": "What is the capital of France?",
+    "expected_keywords": ["not available", "not found", "cannot", "don't know"],
+    "notes": "Out-of-scope question -- the chatbot should refuse, not hallucinate an answer."
+  }
+]

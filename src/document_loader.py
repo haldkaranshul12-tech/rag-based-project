@@ -1,36 +1,30 @@
 """
 Unified text extraction for PDF, DOCX, and image files.
 
-DOCX and image extraction use optional libraries (python-docx, pytesseract,
-Pillow, PyMuPDF). Their imports are deferred into each function so that a
-missing library only affects that specific file type — PDF upload (the
-common case) keeps working regardless.
-
-Image (and scanned-PDF) extraction also needs the Tesseract OCR *engine*
-installed separately on your system — the pytesseract Python package alone
-is just a wrapper around it and won't work without it.
-Windows installer: https://github.com/UB-Mannheim/tesseract/wiki
+Returns a list of per-page strings (extract_pages) so downstream chunking
+can tag every chunk with the page it came from. DOCX and images have no
+native page concept, so they are treated as a single page.
 """
 
 from pypdf import PdfReader
 
 
-def extract_text_from_pdf(file):
+def extract_pages_from_pdf(file):
+    """Returns a list of strings, one per PDF page (in page order)."""
     reader = PdfReader(file)
-    text = ""
+    pages = []
     for page in reader.pages:
-        page_text = page.extract_text()
-        if page_text:
-            text += page_text + "\n"
+        page_text = page.extract_text() or ""
+        pages.append(page_text)
 
-    if len(text.strip()) >= 20:
-        return text
+    if sum(len(p.strip()) for p in pages) >= 20:
+        return pages
 
-    # No real text layer found (likely a scanned PDF) — fall back to OCR
-    return extract_text_from_scanned_pdf(file)
+    # No real text layer found on any page (likely a scanned PDF) -- OCR it
+    return extract_pages_from_scanned_pdf(file)
 
 
-def extract_text_from_scanned_pdf(file):
+def extract_pages_from_scanned_pdf(file):
     try:
         import fitz  # PyMuPDF
         from PIL import Image
@@ -46,24 +40,24 @@ def extract_text_from_scanned_pdf(file):
     file.seek(0)
     pdf_doc = fitz.open(stream=file.read(), filetype="pdf")
 
-    text = ""
+    pages = []
     for page in pdf_doc:
         pix = page.get_pixmap(dpi=200)
         image = Image.open(io.BytesIO(pix.tobytes("png")))
         try:
-            text += pytesseract.image_to_string(image) + "\n"
+            pages.append(pytesseract.image_to_string(image))
         except pytesseract.TesseractNotFoundError:
             raise RuntimeError(
                 "Tesseract OCR engine not found on this system. Install it "
-                "separately (not just via pip) — see "
+                "separately (not just via pip) -- see "
                 "https://github.com/UB-Mannheim/tesseract/wiki for Windows, "
                 "then set pytesseract.pytesseract.tesseract_cmd to its install path."
             )
 
-    return text
+    return pages
 
 
-def extract_text_from_docx(file):
+def extract_pages_from_docx(file):
     try:
         from docx import Document
     except ImportError:
@@ -77,14 +71,15 @@ def extract_text_from_docx(file):
 
     for table in document.tables:
         for row in table.rows:
-            for cell in row.cells:
-                if cell.text.strip():
-                    paragraphs.append(cell.text)
+            for c in row.cells:
+                if c.text.strip():
+                    paragraphs.append(c.text)
 
-    return "\n".join(paragraphs)
+    # DOCX has no reliable page concept without rendering -- treat as one page
+    return ["\n".join(paragraphs)]
 
 
-def extract_text_from_image(file):
+def extract_pages_from_image(file):
     try:
         from PIL import Image
         import pytesseract
@@ -99,28 +94,45 @@ def extract_text_from_image(file):
 
     image = Image.open(file)
     try:
-        return pytesseract.image_to_string(image)
+        return [pytesseract.image_to_string(image)]
     except pytesseract.TesseractNotFoundError:
         raise RuntimeError(
             "Tesseract OCR engine not found on this system. Install it "
-            "separately (not just via pip) — see "
+            "separately (not just via pip) -- see "
             "https://github.com/UB-Mannheim/tesseract/wiki for Windows, "
             "then set pytesseract.pytesseract.tesseract_cmd to its install path."
         )
 
 
-def extract_text(uploaded_file):
+def get_doc_type(filename):
+    """Returns a short document-type label based on the file extension."""
+    name = filename.lower()
+    if name.endswith(".pdf"):
+        return "pdf"
+    elif name.endswith(".docx"):
+        return "docx"
+    elif name.endswith((".png", ".jpg", ".jpeg")):
+        return "image"
+    return "unknown"
+
+
+def extract_pages(uploaded_file):
     """
-    Looks at the uploaded file's extension and calls the right extractor.
-    `uploaded_file` is the Streamlit UploadedFile object.
+    Looks at the uploaded file's extension and returns a list of per-page
+    text strings. `uploaded_file` is the Streamlit UploadedFile object.
     """
     name = uploaded_file.name.lower()
 
     if name.endswith(".pdf"):
-        return extract_text_from_pdf(uploaded_file)
+        return extract_pages_from_pdf(uploaded_file)
     elif name.endswith(".docx"):
-        return extract_text_from_docx(uploaded_file)
+        return extract_pages_from_docx(uploaded_file)
     elif name.endswith((".png", ".jpg", ".jpeg")):
-        return extract_text_from_image(uploaded_file)
+        return extract_pages_from_image(uploaded_file)
     else:
         raise ValueError(f"Unsupported file type: {uploaded_file.name}")
+
+
+def extract_text(uploaded_file):
+    """Backwards-compatible helper: full document text as one string."""
+    return "\n".join(extract_pages(uploaded_file))

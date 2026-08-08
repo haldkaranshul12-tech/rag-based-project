@@ -2,8 +2,8 @@ import time
 import datetime
 import streamlit as st
 
-from src.document_loader import extract_text
-from src.text_splitter import split_text
+from src.document_loader import extract_pages, get_doc_type
+from src.text_splitter import split_pages
 from src.embeddings import create_embeddings
 from src.vector_database import store_embeddings, get_full_document_text, clear_all_documents
 from src.retriever import retrieve_documents
@@ -195,6 +195,18 @@ def relevance_label(distance):
         return "Weak match"
 
 
+def page_label(meta):
+    """Returns ', p. N' if a page number is present in metadata, else ''."""
+    page = meta.get("page")
+    return f", p. {page}" if page else ""
+
+
+def heading_label(meta):
+    """Returns ' — under \"Heading\"' if a section heading is present, else ''."""
+    heading = meta.get("heading")
+    return f' — under "{heading}"' if heading else ""
+
+
 # =========================================================
 #  SIDEBAR
 # =========================================================
@@ -213,12 +225,13 @@ with st.sidebar:
 
             with st.spinner(f"Reading {uploaded_file.name}..."):
                 try:
-                    text = extract_text(uploaded_file)
+                    pages = extract_pages(uploaded_file)
                 except (ValueError, RuntimeError) as e:
                     st.error(f"⚠️ {uploaded_file.name}: {e}")
                     st.session_state.processed_files.append(uploaded_file.name)
                     continue
 
+            text = "\n".join(pages)
             if not text or len(text.strip()) < 20:
                 st.error(
                     f"⚠️ No readable text found in {uploaded_file.name}. It may be "
@@ -228,13 +241,14 @@ with st.sidebar:
                 continue
 
             with st.spinner(f"Splitting {uploaded_file.name} into passages..."):
-                chunks = split_text(text)
+                chunks, page_numbers, headings = split_pages(pages)
 
             with st.spinner("Indexing meaning..."):
                 embeddings = create_embeddings(chunks)
 
             with st.spinner("Filing into the archive..."):
-                store_embeddings(chunks, embeddings, uploaded_file.name)
+                doc_type = get_doc_type(uploaded_file.name)
+                store_embeddings(chunks, embeddings, uploaded_file.name, page_numbers, doc_type, headings)
 
             st.session_state.documents.append({
                 "name": uploaded_file.name,
@@ -349,7 +363,7 @@ else:
                             st.markdown(f"""
                             <div class="margin-note">
                                 <span class="margin-note-tag">§ Chunk {meta.get('chunk_id', '?')}</span>
-                                — {meta.get('source', 'unknown')}
+                                — {meta.get('source', 'unknown')}{page_label(meta)}{heading_label(meta)}
                                 &nbsp;·&nbsp; {relevance_label(dist)}
                             </div>
                             """, unsafe_allow_html=True)
@@ -445,7 +459,7 @@ else:
                             st.markdown(f"""
                             <div class="margin-note">
                                 <span class="margin-note-tag">§ Chunk {meta.get('chunk_id', '?')}</span>
-                                — {meta.get('source', 'unknown')}
+                                — {meta.get('source', 'unknown')}{page_label(meta)}{heading_label(meta)}
                                 &nbsp;·&nbsp; {relevance_label(dist)}
                             </div>
                             """, unsafe_allow_html=True)
